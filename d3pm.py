@@ -101,24 +101,31 @@ class D3PM(nn.Module):
         return log_predicted_x_0, loss.mean(), dict(vb=l_vb.mean(), ce=l_ce.mean(), l_T=l_T, bpt=l_T / math.log(2))
 
     @torch.no_grad()
-    def sample(self, batch_size: int, seq_len: int):
+    def sample(self, batch_size: int, seq_len: int) -> Tensor:
+        device = next(self.parameters()).device
 
         # sample from stationary distribution
-        x_T = torch.ones(batch_size, seq_len) * (self.K - 1)
-        time = torch.ones(batch_size)
+        x_T = torch.ones(batch_size, seq_len, device=device).long() * (self.K - 1)
+        trajectory = [x_T]
+        time = torch.ones(batch_size).long().to(device)
         x_t = x_T
 
+        # iteratively sample from the log posterior
         for _t in range(self.T, 0, -1):
             t = time * _t
             x_t = F.one_hot(x_t, self.K).float()
-            log_predicted_x_0 = self.net(x_t, t.float())
+            log_predicted_x_0 = self.net(x_t, t.float() / self.T)
             p_x_0 = F.softmax(log_predicted_x_0, dim=-1)
-            log_p_x_tminus1, _ = self.compute_unnormalized_log_posterior(p_x_0, t - 1, x_t)
-            x_tminus1 = D.Categorical(logits=log_p_x_tminus1).sample()
-            x_t = x_tminus1
+            if _t > 1:
+                log_p_x_tminus1, _ = self.compute_unnormalized_log_posterior(p_x_0, t - 1, x_t)
+                x_tminus1 = D.Categorical(logits=log_p_x_tminus1).sample()
+                x_t = x_tminus1
+                trajectory.append(x_tminus1)
 
-        # Now _t is 1, and x_tminus1 is x_0
-        return x_tminus1
+        # now _t is 1, and we have the final predicted p(x_0)
+        trajectory.append(D.Categorical(logits=log_predicted_x_0).sample())
+        # return the full trajectory of T steps, plus the final sample from p(x_0)
+        return torch.stack(trajectory, dim=0)
 
 
 if __name__ == "__main__":
