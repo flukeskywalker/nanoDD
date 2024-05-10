@@ -114,7 +114,7 @@ class D3PM(nn.Module):
         for _t in range(self.T, 0, -1):
             t = time * _t
             x_t = F.one_hot(x_t, self.K).float()
-            log_predicted_x_0 = self.net(x_t, t.float() / self.T)
+            log_predicted_x_0 = self.net(x_t, t.float())
             p_x_0 = F.softmax(log_predicted_x_0, dim=-1)
             if _t > 1:
                 log_p_x_tminus1, _ = self.compute_unnormalized_log_posterior(p_x_0, t - 1, x_t)

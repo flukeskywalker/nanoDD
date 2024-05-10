@@ -29,7 +29,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-from d3pm import D3PM
+import configs
 
 # default config values designed to train a 6 layer D3PM on text8 for 400B tokens
 # -----------------------------------------------------------------------------
@@ -38,7 +38,7 @@ log_to_stdout = True
 log_to_neptune = False
 neptune_project = ""
 
-# I/O
+# I/O & eval
 out_dir = Path("./")
 eval_interval = 25_000
 log_interval = 10
@@ -54,15 +54,7 @@ batch_size = 256 # if gradient_accumulation_steps > 1, this is the micro-batch s
 seq_len = 256
 
 # model
-model_cls = D3PM
-vocab_size = None # None means read from meta.pkl
-n_embed = 768
-n_heads = n_embed // 64
-n_blocks = 6
-n_cond = 128
-dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-T = 1000
-lambda_ce = 0.01
+model_cls, model_args = configs.d3pm_text8_D6()
 
 # adamw optimizer
 learning_rate = 1e-3 # max learning rate
@@ -188,27 +180,21 @@ iter_num = 0
 best_val_loss = 1e9
 
 # attempt to derive vocab_size from the dataset
-if vocab_size is None:
-    meta_path = data_dir / "meta.pkl"
-    assert meta_path.exists(), f"{meta_path} does not exist!"
-    with open(meta_path, "rb") as f:
-        meta = pickle.load(f)
-    vocab_size = meta["vocab_size"]
-    print(f"found vocab_size = {vocab_size} (inside {meta_path})")
-    # decoding = meta["decoding"]
-
-# model init
-model_args = dict(vocab_size=vocab_size,n_embed=n_embed, n_heads=n_heads, n_blocks=n_blocks, n_cond=n_cond,
-                  dropout=dropout, T=T, lambda_ce=lambda_ce)
+meta_path = data_dir / "meta.pkl"
+assert meta_path.exists(), f"{meta_path} does not exist!"
+with open(meta_path, "rb") as f:
+    meta = pickle.load(f)
+vocab_size = meta["vocab_size"]
+print(f"found vocab_size = {vocab_size} (inside {meta_path})")
 
 if init_from == "scratch":
     print("Initializing a new model from scratch")
-    model = D3PM(**model_args)
+    model = model_cls(**model_args)
 elif init_from == "resume":
     print(f"Resuming training from {out_dir}")
     checkpoint = torch.load(out_dir / "ckpt.pt", map_location=device)
-    checkpoint_model_args = checkpoint["model_args"]
-    model = D3PM(**checkpoint_model_args)
+    model_args = checkpoint["model_args"]
+    model = model_cls(**model_args)
     model.load_state_dict(checkpoint["model"])
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
