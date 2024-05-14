@@ -85,20 +85,24 @@ class D3PM(nn.Module):
         log_p, _ = self.compute_unnormalized_log_posterior(p_x_0, t, x_tplus1)
 
         # 3. Compute KL(q || p)
-        l_vb = F.softmax(log_q, dim=-1) * (F.log_softmax(log_q, dim=-1) - F.log_softmax(log_p, dim=-1))
-        l_vb = F.relu(l_vb.sum(dim=-1))  # stability trick from official impl
+        l_kl = F.softmax(log_q, dim=-1) * (F.log_softmax(log_q, dim=-1) - F.log_softmax(log_p, dim=-1))
+        l_kl = F.relu(l_kl.sum(dim=-1))  # stability trick from official impl
 
         # 4. Compute CE(q) if t == 0
         l_ce = F.cross_entropy(log_predicted_x_0.view(-1, self.K), data.flatten(), reduction="none").view_as(data)
 
-        loss = l_vb + self.lambda_ce * l_ce
+        loss = l_kl + self.lambda_ce * l_ce
         loss = torch.where(t[:, None] == 0, l_ce, loss)
 
         # 5. Compute an estimate of the T-step loss
         l_0 = l_ce[t == 0]
-        l_T = l_vb.mean() * self.T + (l_0.mean() if l_0.numel() > 0 else 0.0)
+        l_kl = l_kl[t > 0]  # this is l_{T-1}
+        if l_0.numel() > 0:
+            l_T = l_kl.mean() * (self.T - 1) + l_0.mean()
+        else:
+            l_T = l_kl.mean() * self.T
 
-        return log_predicted_x_0, loss.mean(), dict(vb=l_vb.mean(), ce=l_ce.mean(), l_T=l_T, bpt=l_T / math.log(2))
+        return log_predicted_x_0, loss.mean(), dict(kl=l_kl.mean(), ce=l_ce.mean(), l_T=l_T, bpt=l_T / math.log(2))
 
     @torch.no_grad()
     def sample(self, batch_size: int, seq_len: int) -> Tensor:
