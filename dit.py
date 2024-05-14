@@ -63,12 +63,12 @@ class TimestepEmbedder(nn.Module):
     Embeds scalar timesteps into vector representations.
     """
 
-    def __init__(self, hidden_size, frequency_embedding_size=256, silu=True):
+    def __init__(self, n_embed, frequency_embedding_size=256, silu=True):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size, bias=True),
+            nn.Linear(frequency_embedding_size, n_embed, bias=True),
             nn.SiLU(),
-            nn.Linear(hidden_size, hidden_size, bias=True),
+            nn.Linear(n_embed, n_embed, bias=True),
         )
         self.frequency_embedding_size = frequency_embedding_size
 
@@ -103,7 +103,7 @@ class TimestepEmbedder(nn.Module):
 
 
 class DDiTBlock(nn.Module):
-    def __init__(self, dim, n_heads, cond_dim, mlp_ratio=4, dropout=0.1):
+    def __init__(self, dim, n_heads, n_cond, mlp_ratio=4, dropout=0.1):
         super().__init__()
         self.n_heads = n_heads
         self.dim = dim
@@ -123,7 +123,7 @@ class DDiTBlock(nn.Module):
 
         self.dropout = dropout
 
-        self.adaLN_modulation = nn.Linear(cond_dim, 6 * dim, bias=True)
+        self.adaLN_modulation = nn.Linear(n_cond, 6 * dim, bias=True)
         self.adaLN_modulation.weight.data.zero_()
         self.adaLN_modulation.bias.data.zero_()
 
@@ -163,35 +163,13 @@ class DDiTBlock(nn.Module):
         return x
 
 
-class DDitFinalLayer(nn.Module):
-    def __init__(self, hidden_size, out_channels, cond_dim):
-        super().__init__()
-        self.norm_final = LayerNorm(hidden_size)
-        self.linear = nn.Linear(hidden_size, out_channels)
-        self.linear.weight.data.zero_()
-        self.linear.bias.data.zero_()
-
-        self.adaLN_modulation = nn.Linear(cond_dim, 2 * hidden_size, bias=True)
-        self.adaLN_modulation.weight.data.zero_()
-        self.adaLN_modulation.bias.data.zero_()
-
-    def forward(self, x, c):
-        if c.dim() == 2:  # same beta for all variables
-            shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=2)
-        else:
-            shift, scale = self.adaLN_modulation(c).chunk(2, dim=2)
-
-        x = modulate(self.norm_final(x), shift, scale)
-        x = self.linear(x)
-        return x
-
-
 class DiT(nn.Module):
     def __init__(self, vocab_size, n_embed=768, n_heads=12, n_blocks=24, n_cond=128, dropout=0.1):
         super().__init__()
 
         self.vocab_embed = nn.Linear(vocab_size, n_embed, bias=False)
-        torch.nn.init.kaiming_uniform_(self.vocab_embed.weight, a=math.sqrt(5))
+        init_std = 1 / math.sqrt(n_embed)
+        torch.nn.init.trunc_normal_(self.vocab_embed.weight, 0, init_std, a=-3 * init_std, b=3 * init_std)
         self.c_embed = TimestepEmbedder(n_cond)
         self.rotary_emb = Rotary(n_embed // n_heads)
 
@@ -199,12 +177,17 @@ class DiT(nn.Module):
             [DDiTBlock(n_embed, n_heads, n_cond, dropout=dropout) for _ in range(n_blocks)]
         )
 
-        self.output_layer = DDitFinalLayer(n_embed, vocab_size, n_cond)
+        # build output layer
+        self.norm_final = LayerNorm(n_embed)
+        self.adaLN_modulation = nn.Linear(n_cond, 2 * n_embed, bias=True)
+        self.adaLN_modulation.weight.data.zero_()
+        self.adaLN_modulation.bias.data.zero_()
+
         # report number of parameters
         print(f"number of parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad) / 1e6:.2f}M")
 
-    def forward(self, theta, t):
-        x = self.vocab_embed(theta)
+    def forward(self, x, t):
+        x = self.vocab_embed(x)
         c = F.silu(self.c_embed(t))
 
         rotary_cos_sin = self.rotary_emb(x)
@@ -213,6 +196,9 @@ class DiT(nn.Module):
             for i in range(len(self.blocks)):
                 x = self.blocks[i](x, rotary_cos_sin, c)
 
-            x = self.output_layer(x, c)
+            shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=-1)
+            x = modulate(self.norm_final(x), shift, scale)
+            # use linear proj if output layer exists else use the input embedding weights transposed
+            x = F.linear(x, self.vocab_embed.weight.mT)
 
         return x.float()
