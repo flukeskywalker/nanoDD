@@ -1,0 +1,5 @@
+einops~=0.7.0
+ema-pytorch~=0.4.8
+numpy~=1.26.4
+neptune~=1.10.2
+torch~=2.2.1

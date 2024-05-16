@@ -28,7 +28,7 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
-
+from ema_pytorch import EMA
 import configs
 
 # default config values designed to train a 6 layer D3PM on text8 for 400B tokens
@@ -50,7 +50,7 @@ trn_limit = None
 # data
 dataset = "text8"
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 256 # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 512 # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 256
 
 # model
@@ -90,10 +90,6 @@ if ddp:
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     seed_offset = ddp_rank # each process gets a different seed
-    # world_size number of processes will be training simultaneously, so we can scale
-    # down the desired gradient accumulation iterations per process proportionally
-    assert gradient_accumulation_steps == 1 or gradient_accumulation_steps % ddp_world_size == 0
-    # gradient_accumulation_steps //= ddp_world_size
 else:
     # if not ddp, we are running on a single gpu, and one process
     master_process = True
@@ -163,16 +159,14 @@ def configure_optimizer(model, weight_decay: float, lr: float, betas, device_typ
 @torch.no_grad()
 def estimate_val_loss():
     print("\nValidating...")
-    model.eval()
     loss, metrics = 0.0, defaultdict(float)
     for k in range(eval_iters):
         X = get_batch("val")
-        _, batch_loss, batch_metrics = model(X)
+        _, batch_loss, batch_metrics = ema(X)
         loss += (batch_loss.item() / eval_iters)
         for k, v in batch_metrics.items():
             metrics[k] += (v.item() / eval_iters)
 
-    model.train()
     return loss, metrics
 
 # init these up here, can override if init_from="resume" (i.e. from a checkpoint)
@@ -190,18 +184,24 @@ print(f"found vocab_size = {vocab_size} (inside {meta_path})")
 if init_from == "scratch":
     print("Initializing a new model from scratch")
     model = model_cls(**model_args)
+    model.to(device)
+    ema = EMA(model, beta=0.9999, update_after_step=100, update_every=1, inv_gamma=1.0, power=1.0,
+              include_online_model=False)
 elif init_from == "resume":
     print(f"Resuming training from {out_dir}")
     checkpoint = torch.load(out_dir / "ckpt.pt", map_location=device)
     model_args = checkpoint["model_args"]
     model = model_cls(**model_args)
     model.load_state_dict(checkpoint["model"])
+    model.to(device)
+    ema = EMA(model, beta=0.9999, update_after_step=100, update_every=1, inv_gamma=1.0, power=1.0,
+              include_online_model=False)
+    ema.load_state_dict(checkpoint["ema"])
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
 else:
     raise ValueError(init_from)
 
-model.to(device)
 model.train()
 
 # optimizer
@@ -262,6 +262,7 @@ while True:
             if iter_num > 0:
                 checkpoint = {
                     "model": raw_model.state_dict(),
+                    "ema": ema.state_dict(),
                     "optimizer": optimizer.state_dict(),
                     "model_cls": raw_model.__class__.__name__,
                     "model_args": model_args,
@@ -315,7 +316,7 @@ while True:
             run["metrics/train/grad_norm"].log(grad_norm.item(), step=iter_num + 1)
             run["metrics/train/param_norm"].log(param_norm, step=iter_num + 1)
 
-
+    ema.update()
     iter_num += 1
 
     # termination conditions
