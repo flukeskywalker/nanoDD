@@ -1,4 +1,5 @@
 import math
+from typing import Optional
 
 import torch
 from torch import nn, Tensor
@@ -67,13 +68,13 @@ class D3PM(nn.Module):
 
         return log_posterior, x_tplus1
 
-    def forward(self, data: Tensor) -> tuple[Tensor, Tensor, dict]:
+    def forward(self, data: Tensor, t: Optional[Tensor] = None) -> tuple[Tensor, Tensor, dict]:
         """Return the output params, training loss, and dict with useful items"""
         # in paper: for t in {2, ... T},   compute E_{x_t}   kl[ q(x_t-1 | ... || p(x_t-1 | ... ) ] + recon loss
         #  in code: for t in {1, ... T-1}, compute E_{x_t+1} kl[ q(x_t | ...)  || p(x_t | ...) ] + recon loss
         # t == 0 means recon loss only
 
-        t = torch.randint(0, self.T, (data.size(0),), device=data.device)
+        t = torch.randint(0, self.T, (data.size(0),), device=data.device) if t is None else t
         x_0 = F.one_hot(data, self.K).float()  # x_0.shape == BTK, t.shape = B
 
         # 1. Compute the log posterior: first sample from q(x_{t+1} | x_0), then compute q(x_t | x_{t+1}, x_0)
