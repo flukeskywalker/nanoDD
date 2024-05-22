@@ -31,7 +31,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from ema_pytorch import EMA
 import configs
 
-# default config values designed to train a 6 layer D3PM on text8 for 400B tokens
+# default config values designed to train a 6 layer D3PM on text8 for ~400B tokens
 # -----------------------------------------------------------------------------
 log_to_stdout = True
 # neptune logging
@@ -39,7 +39,7 @@ log_to_neptune = False
 neptune_project = ""
 
 # I/O & eval
-out_dir = Path("./")
+out_dir = Path("./checkpoints")
 eval_interval = 25_000
 log_interval = 10
 eval_iters = 1000
