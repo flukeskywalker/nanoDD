@@ -31,8 +31,10 @@ from torch.distributed import init_process_group, destroy_process_group
 from ema_pytorch import EMA
 import configs
 
-# default config values designed to train a 6 layer D3PM on text8 for ~400B tokens
-# -----------------------------------------------------------------------------
+# default config values designed to train a 6 layer D3PM on text8 for ~260B tokens on 8 GPUs
+# using ~30GB GPU RAM per GPU (total batch size = 256x8 = 2048).
+# for fewer/smaller GPUs or larger models, adjust batch_size and gradient_accumulation_steps
+# ------------------------------------------------------------------------------------------
 log_to_stdout = True
 # neptune logging
 log_to_neptune = False
@@ -40,17 +42,17 @@ neptune_project = ""
 
 # I/O & eval
 out_dir = Path("./checkpoints")
+resume_dir = None  # if not None, resume from ckpt.pt in this dir
 eval_interval = 25_000
 log_interval = 10
 eval_iters = 1000
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
-init_from = "scratch" # "scratch" or "resume"
 trn_limit = None
 
 # data
 dataset = "text8"
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 512 # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 256 # if gradient_accumulation_steps > 1, this is the micro-batch size
 seq_len = 256
 
 # model
@@ -181,15 +183,15 @@ with open(meta_path, "rb") as f:
 vocab_size = meta["vocab_size"]
 print(f"found vocab_size = {vocab_size} (inside {meta_path})")
 
-if init_from == "scratch":
+if resume_dir is None:
     print("Initializing a new model from scratch")
     model = model_cls(**model_args)
     model.to(device)
     ema = EMA(model, beta=0.9999, update_after_step=100, update_every=1, inv_gamma=1.0, power=1.0,
               include_online_model=False)
-elif init_from == "resume":
-    print(f"Resuming training from {out_dir}")
-    checkpoint = torch.load(out_dir / "ckpt.pt", map_location=device)
+else:
+    print(f"Resuming training from {resume_dir}")
+    checkpoint = torch.load(resume_dir / "ckpt.pt", map_location=device)
     model_args = checkpoint["model_args"]
     model = model_cls(**model_args)
     model.load_state_dict(checkpoint["model"])
@@ -199,14 +201,12 @@ elif init_from == "resume":
     ema.load_state_dict(checkpoint["ema"])
     iter_num = checkpoint["iter_num"]
     best_val_loss = checkpoint["best_val_loss"]
-else:
-    raise ValueError(init_from)
 
 model.train()
 
 # optimizer
 optimizer = configure_optimizer(model, weight_decay, learning_rate, (beta1, beta2), device_type)
-if init_from == "resume":
+if resume_dir is not None:
     optimizer.load_state_dict(checkpoint["optimizer"])
 checkpoint = None # free up memory
 
