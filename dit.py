@@ -1,3 +1,4 @@
+# From https://github.com/louaaron/Score-Entropy-Discrete-Diffusion/tree/main/model (MIT) with many modifications
 import math
 
 import torch
@@ -63,7 +64,7 @@ class TimestepEmbedder(nn.Module):
     Embeds scalar timesteps into vector representations.
     """
 
-    def __init__(self, n_embed, frequency_embedding_size=256, silu=True):
+    def __init__(self, n_embed, frequency_embedding_size=256):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, n_embed, bias=True),
@@ -76,20 +77,17 @@ class TimestepEmbedder(nn.Module):
     def timestep_embedding(t, dim, max_period=10000):
         """
         Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
-                          These may be fractional.
-        :param dim: the dimension of the output.
+        :param t: a 1-D (N,) or 2-D (N, L) Tensor with time indices. These may be fractional.
+        :param dim: the dimension of the output D.
         :param max_period: controls the minimum frequency of the embeddings.
-        :return: an (N, D) Tensor of positional embeddings.
+        :return: an (N, D) Tensor of positional embeddings if input is (N,) and (N, L, D) if input is (N, L)
         """
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
-        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-            device=t.device
-        )
-        if t.dim() == 2:
+        freqs = torch.exp(-math.log(max_period) * torch.arange(0, half, dtype=torch.float32, device=t.device) / half)
+        if t.dim() == 2:  # different time step for each batch item and variable
             args = t[:, :, None] * freqs[None, None, :]
-        else:
+        else:             # t.dim() == 1, different time step for each batch item
             args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
@@ -129,12 +127,10 @@ class DDiTBlock(nn.Module):
 
     def forward(self, x, rotary_cos_sin, c):
 
-        if c.dim() == 2:  # same beta for all variables
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c)[:, None].chunk(
-                6, dim=2
-            )
-        else:  # c.dim() == 3 when beta is diff for diff variables
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=2)
+        modulation = self.adaLN_modulation(c)
+        # if c.dim() == 2, add a dummy dim since all variables are modulated the same way, otherwise c.dim() == 3
+        modulation = modulation[:, None] if c.dim() == 2 else modulation
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = modulation.chunk(6, dim=-1)
 
         # attention operation
         x_skip = x
@@ -154,7 +150,6 @@ class DDiTBlock(nn.Module):
 
         x = self.attn_out(x)
         x = gate_msa * F.dropout(x, p=self.dropout, training=self.training) + x_skip
-        # x = bias_dropout_scale_fn(self.attn_out(x), None, gate_msa, x_skip, self.dropout)
 
         # mlp operation
         x_skip = x
@@ -170,14 +165,12 @@ class DiT(nn.Module):
         self.vocab_embed = nn.Linear(vocab_size, n_embed, bias=False)
         init_std = 1 / math.sqrt(n_embed)
         torch.nn.init.trunc_normal_(self.vocab_embed.weight, 0, init_std, a=-3 * init_std, b=3 * init_std)
+
         self.c_embed = TimestepEmbedder(n_cond)
         self.rotary_emb = Rotary(n_embed // n_heads)
+        self.blocks = nn.ModuleList([DDiTBlock(n_embed, n_heads, n_cond, dropout=dropout) for _ in range(n_blocks)])
 
-        self.blocks = nn.ModuleList(
-            [DDiTBlock(n_embed, n_heads, n_cond, dropout=dropout) for _ in range(n_blocks)]
-        )
-
-        # build output layer
+        # build output modulation; we will reuse input embedding weights for projection
         self.norm_final = LayerNorm(n_embed)
         self.adaLN_modulation = nn.Linear(n_cond, 2 * n_embed, bias=True)
         self.adaLN_modulation.weight.data.zero_()
@@ -196,9 +189,19 @@ class DiT(nn.Module):
             for i in range(len(self.blocks)):
                 x = self.blocks[i](x, rotary_cos_sin, c)
 
-            shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=-1)
+            modulation = self.adaLN_modulation(c)
+            modulation = modulation[:, None] if c.dim() == 2 else modulation
+            shift, scale = modulation.chunk(2, dim=-1)
+
             x = modulate(self.norm_final(x), shift, scale)
-            # use linear proj if output layer exists else use the input embedding weights transposed
             x = F.linear(x, self.vocab_embed.weight.mT)
 
         return x.float()
+
+
+if __name__ == "__main__":
+    batch_size, seq_len, vocab_size = 3, 7, 27
+    dit = DiT(vocab_size=vocab_size, n_embed=768, n_heads=12, n_blocks=1, n_cond=128, dropout=0.1)
+    x = torch.randn(batch_size, seq_len, vocab_size)
+    t = torch.rand(batch_size)
+    print(dit(x, t).shape)
