@@ -5,7 +5,7 @@
   <b>nanoDD</b>
 </p>
 
-I'm writing simple scalable Discrete Diffusion (DD) implementations in PyTorch for learning, research and fun!
+I'm writing simple & scalable Discrete Diffusion implementations in PyTorch for education, research and fun!
 
 # What is Discrete Diffusion?
 Discrete Diffusion is a set of techniques for modeling discrete data by learning a series of conditional *noisy* distributions over *all* token variables. 
@@ -14,8 +14,10 @@ This is in contrast to auto-regressive LLMs (GPTs etc) that learn *non-noisy* co
 In simple terms, auto-regressive LMs generate text from left-to-right, while DDLMs generate a chunk of text in parallel.
 
 Example:
+
 ![img](./_img/sample.gif)
-This GIF shows how sampling from a pre-trained mask-based discrete diffusion model works using the [sampling script](./sample.py) in this repo.
+
+This GIF shows what sampling from a pre-trained masking-based discrete diffusion model looks like using the [sampling script](./sample.py) in this repo.
 We start out with the whole sequence composed of mask tokens (maximum "noise") and iteratively unmask --- and hence reduce the noise --- in the sequence.
 
 # Goals for this repo
@@ -29,7 +31,7 @@ The training script itself is directly adapted from nanoGPT.
 To start, this repo provides the code to [train](./train.py) an [Absorbing (or "Masking") D3PM](https://arxiv.org/abs/2107.03006) using a [Diffusion Transformer](./dit.py) on the [text8](https://paperswithcode.com/dataset/text8) dataset.
 
 Upcoming:
-- more models (in addition to D3PM Absorbing)
+- more models in addition to D3PM Absorbing
 - more datasets; text8 is a standard academic benchmark allowing us to compare results to papers, but samples are ugly :(
 
 # Usage
