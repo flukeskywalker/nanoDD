@@ -81,3 +81,17 @@ python evaluate.py ./nanoDD-D3PM-text8/ckpt.pt --split test
 # check options for eval script
 python evaluate.py --help
 ```
+
+# Results
+
+| Model               | Test Bits/Token |
+|---------------------|:---------------:|
+| D3PM Absorbing      |      1.37       |
+
+Training the D3PM Absorbing model will produce loss values similar to those in the plot below, finally reaching a validation loss of 1.30, which results in a test loss of 1.37.
+Note that this is substantially better than in the original paper (1.45).
+The training loss will start at around 5.0 (approximated and converted to bits-per-token) and you will observe noisy loss values throughout training due to noise in the diffusion process.
+
+You can sample diffusion timesteps more uniformly ("low-discrepancy sampler") and this reduces the variance in the loss but in my experience does not make the training faster or reach a lower mean loss.
+
+![img](_img/d3pm_absorbing_loss.png)
