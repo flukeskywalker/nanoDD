@@ -4,7 +4,6 @@ from pathlib import Path
 import fire
 import numpy as np
 import torch
-from ema_pytorch import EMA
 from torch import Tensor
 
 from d3pm_absorbing import D3PMAbsorbing
@@ -77,15 +76,13 @@ def main(
     model = model_cls(**model_args)
 
     if load_ema:
-        ema = EMA(model, forward_method_names=("T",), include_online_model=False)
-        ema.load_state_dict(ckpt["ema"])
-        model_to_eval = ema
+        state_dict = {k[len("ema_model."):]: v for k, v in ckpt["ema"].items() if k.startswith("ema_model.")}
+        model.load_state_dict(state_dict)
     else:
         model.load_state_dict(ckpt["model"])
-        model_to_eval = model
 
-    model_to_eval.to(device)
-    model_to_eval.eval()
+    model.to(device)
+    model.eval()
     print(f"Loaded model with load_ema={load_ema}")
 
     kl_list = []
@@ -95,7 +92,7 @@ def main(
         print(f"Estimating KL with {n_batches_kl} batches of size {batch_size}")
         for i in range(n_batches_kl):
             x = get_batch(data, batch_size, seq_len, device)
-            kl = estimate_kl(model_to_eval, x)
+            kl = estimate_kl(model, x)
             kl_list.append(kl)
 
             if (i + 1) % log_interval == 0:
@@ -104,13 +101,13 @@ def main(
         print(f"Estimating recon loss with {n_batches_recon} batches of size {batch_size}")
         for i in range(n_batches_recon):
             x = get_batch(data, batch_size, seq_len, device)
-            recon = estimate_recon(model_to_eval, x)
+            recon = estimate_recon(model, x)
             recon_list.append(recon)
 
             if (i + 1) % log_interval == 0:
                 print(f"batch {i + 1:5d}/{n_batches_recon}, recon_mean {mean_bits(recon_list)} bits per token")
 
-    evals = estimate_total_loss(model_to_eval, kl_list, recon_list)
+    evals = estimate_total_loss(model, kl_list, recon_list)
     print("Final estimated evals:\n", evals)
 
 
