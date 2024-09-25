@@ -8,10 +8,11 @@
 I'm writing simple & scalable Discrete Diffusion implementations in PyTorch for education, research and fun!
 
 # What is Discrete Diffusion?
-Discrete Diffusion is a set of techniques for modeling discrete data by learning a series of conditional *noisy* distributions over *all* token variables. 
-It is the application of ideas similar to those used by _continuous diffusion_ (used for image generation models like Stable Diffusion, Midjourney, Flux etc.) to discrete data, like text. 
-This is in contrast to autoregressive LLMs (GPTs etc.) that learn *non-noisy* conditional distributions over *one* token variable at a time.
-In simple terms, autoregressive LMs generate text from left-to-right, while DDLMs generate a chunk of text in parallel.
+In simple terms, typical LLMs (such as GPTs) generate text from left-to-right, while Discrete Diffusion LMs generate a chunk of text in parallel.
+
+More formally, Diffusion is a set of techniques for modeling data by learning a series of conditional *noisy* distributions over *all* token variables. 
+This is in contrast to autoregressive models (GPTs etc) that learn *non-noisy* conditional distributions over *one* token variable at a time.
+*Discrete* Diffusion is the application of ideas similar to those used by *continuous* diffusion (used for image generation models like Stable Diffusion, Midjourney, Flux etc.) to discrete data, like text. 
 
 Example:
 

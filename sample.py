@@ -58,7 +58,7 @@ def visualize_batch(batch: Tensor, dataset: str, truncate: bool = True, return_t
     for i in range(len(decoded)):
         if truncate:
             # for each sample, print only what fits on one terminal line
-            print(repr(decoded[i])[1: term_width - 5] + "...", flush=True)
+            print(repr(decoded[i])[1 : term_width - 5] + "...", flush=True)
         else:
             print(" - " * (term_width // 3))
             print(decoded[i], flush=True)
@@ -66,8 +66,6 @@ def visualize_batch(batch: Tensor, dataset: str, truncate: bool = True, return_t
     if return_to_top:
         # Use ANSI escape code for moving up lines so next output will over-write previous lines
         print("\033[F" * len(decoded), end="", flush=True)
-        import sys
-        sys.stdout.flush()
 
 
 @torch.no_grad()
@@ -113,12 +111,24 @@ def sample_d3pm_absorbing(
 
 
 def main(
-    ckpt_path: str,  # full path to ckpt.pt
+    ckpt_path: str,
     load_ema: bool = True,
     batch_size: int = 1,
     dataset: str = "text8",
     seed: int = 123,
 ):
+    """
+    Main function to load a model from a checkpoint and perform sampling.
+
+    Args:
+        ckpt_path (str): Full path to the checkpoint (.pt) file containing model weights.
+        load_ema (bool, optional): If True, load the Exponential Moving Average (EMA) model weights.
+                                   Defaults to True.
+        batch_size (int, optional): Batch size for sampling. Defaults to 1.
+        dataset (str, optional): Dataset to use for sampling. Can be 'text8' or 'openwebtext'.
+                                 Defaults to 'text8'.
+        seed (int, optional): Random seed for reproducibility. Defaults to 123.
+    """
 
     torch.manual_seed(seed)
 
@@ -134,7 +144,7 @@ def main(
 
     model = model_cls(**model_args)
     if load_ema:
-        state_dict = {k[len("ema_model."):]: v for k, v in ckpt["ema"].items() if k.startswith("ema_model.")}
+        state_dict = {k[len("ema_model.") :]: v for k, v in ckpt["ema"].items() if k.startswith("ema_model.")}
         model.load_state_dict(state_dict)
     else:
         model.load_state_dict(ckpt["model"])

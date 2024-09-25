@@ -12,7 +12,7 @@ from d3pm_absorbing import D3PMAbsorbing
 def get_batch(data: np.array, batch_size: int, seq_len: int, device: str) -> torch.Tensor:
     """Returns a random batch of data"""
     ix = torch.randint(data.shape[0] - seq_len, (batch_size,))
-    x = torch.stack([torch.from_numpy(data[i: i + seq_len].astype(np.int64)) for i in ix])
+    x = torch.stack([torch.from_numpy(data[i : i + seq_len].astype(np.int64)) for i in ix])
     if device == "cuda":
         x = x.pin_memory().to(device, non_blocking=True)
     else:
@@ -44,7 +44,9 @@ def std_bits(loss_list: list[float]) -> float:
 
 def estimate_total_loss(model: torch.nn.Module, kl_list: list[float], recon_list: list[float]) -> dict:
     return {
-        "kl_mean": mean_bits(kl_list), "recon_mean": mean_bits(recon_list), "kl_std": std_bits(kl_list),
+        "kl_mean": mean_bits(kl_list),
+        "recon_mean": mean_bits(recon_list),
+        "kl_std": std_bits(kl_list),
         "recon_std": std_bits(recon_list),
         "bits_per_token_mean": (mean_bits(kl_list) * (model.T - 1)) + mean_bits(recon_list),
     }
@@ -64,6 +66,24 @@ def main(
     log_interval=50,  # print current estimate periodically
     device="cuda",
 ):
+    """
+    Main function to load a model from a checkpoint and evaluate it on a dataset split.
+
+    Args:
+        checkpoint_path (str): Path to the checkpoint (.pt) file containing model weights.
+        seed (int, optional): Random seed for reproducibility. Defaults to 1.
+        split (str, optional): Dataset split to evaluate on ('train', 'val', or 'test'). Defaults to 'val'.
+        data_dir (str, optional): Directory containing the dataset (.npy) files for the specified split.
+                                  Defaults to 'text8'.
+        load_ema (bool, optional): Whether to load Exponential Moving Average (EMA) weights. Defaults to True.
+        seq_len (int, optional): Sequence length for model evaluation. Defaults to 256.
+        batch_size (int, optional): Batch size for evaluation. Defaults to 512.
+        n_batches_kl (int, optional): Number of batches to evaluate the n-step or continuous time KL. Defaults to 10000.
+        n_batches_recon (int, optional): Number of batches to evaluate the final cross-entropy or reconstruction loss.
+                                         Defaults to 100.
+        log_interval (int, optional): Interval to print the current evaluation metrics. Defaults to 50.
+        device (str, optional): Device to run the model on (e.g., 'cuda' or 'cpu'). Defaults to 'cuda'.
+    """
 
     torch.manual_seed(seed)
     assert split in ["train", "val", "test"], f"split must be train, val or test, but was {split}"
@@ -76,7 +96,7 @@ def main(
     model = model_cls(**model_args)
 
     if load_ema:
-        state_dict = {k[len("ema_model."):]: v for k, v in ckpt["ema"].items() if k.startswith("ema_model.")}
+        state_dict = {k[len("ema_model.") :]: v for k, v in ckpt["ema"].items() if k.startswith("ema_model.")}
         model.load_state_dict(state_dict)
     else:
         model.load_state_dict(ckpt["model"])
