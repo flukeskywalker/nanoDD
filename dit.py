@@ -181,7 +181,7 @@ class DiT(nn.Module):
         self.adaLN_modulation.bias.data.zero_()
 
         # report number of parameters
-        print(f"Number of parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad) / 1e6:.2f}M")
+        print(f"number of parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad) / 1e6:.2f}M")
 
     @autocast("cuda", dtype=torch.bfloat16)
     def forward(self, x: Tensor, t: Tensor) -> Tensor:

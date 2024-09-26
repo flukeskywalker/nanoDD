@@ -46,9 +46,10 @@ parser.add_argument(
     choices=[k for (k, v) in getmembers(configs, isfunction)],
     help="config function name in config.py",
 )
+parser.add_argument('--no-compile', action='store_false', dest='compile', help='Disable torch.compile')
 args = parser.parse_args()
 
-print(f"Importing model and cfg: {args.config}")
+print(f"importing model and cfg: {args.config}")
 model_cls, model_args, training_args = getattr(configs, args.config)()
 
 # -----------------------------------------------------------------------------
@@ -68,11 +69,10 @@ log_interval = 10
 eval_iters = 125  # per GPU evaluation iters
 eval_key = "l_T"  # l_T for D3PM is the approx. T-step loss
 always_save_checkpoint = False  # if True, always save a checkpoint after each eval
-trn_limit = None
 
 # data
 dataset = "text8"
-data_dir = Path(f"./{dataset}")
+data_root_dir = "."
 gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 batch_size = 256  # note: this is the micro-batch size PER GPU
 seq_len = 256
@@ -97,7 +97,7 @@ backend = "nccl"  # "nccl", "gloo", etc.
 if torch.cuda.is_available():
     assert torch.cuda.is_bf16_supported(), "bf16 not supported!"
 device = "cuda" if torch.cuda.is_available() else "cpu"  # examples: "cpu", "cuda", "cuda:0", "cuda:1" etc.
-compile = True if torch.cuda.is_available() else False
+compile = True if torch.cuda.is_available() and args.compile else False
 
 # update training args with model-specific values
 for k in training_args.keys():
@@ -108,15 +108,20 @@ globals().update(training_args)
 # useful functions for training
 
 
-# dataloader
+# poor man's data loader with support for loading simple np arrays
+data_dir = Path(data_root_dir) / dataset
+if dataset == "text8":
+    # text8 is stored as a simple np.array
+    def mmap_data(split: str) -> np.array:
+        return np.load(data_dir / f"{split}.npy", mmap_mode="r")
+else:
+    def mmap_data(split: str) -> np.array:
+        return np.memmap(data_dir / f"{split}.bin", dtype=np.uint16, mode="r")
+
 def get_batch(split):
-    if split == "train":
-        data = np.load(data_dir / "train.npy", mmap_mode="r")
-        ix = torch.randint(trn_limit or data.shape[0] - seq_len, (batch_size,))
-    else:
-        data = np.load(data_dir / "val.npy", mmap_mode="r")
-        ix = torch.randint(data.shape[0] - seq_len, (batch_size,))
-    x = torch.stack([torch.from_numpy(data[i : i + seq_len].astype(np.int64)) for i in ix])
+    data = mmap_data(split)
+    ix = torch.randint(data.shape[0] - seq_len, (batch_size,))
+    x = torch.stack([torch.from_numpy(data[i: i + seq_len].astype(np.int64)) for i in ix])
     if device_type == "cuda":
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
         x = x.pin_memory().to(device, non_blocking=True)
@@ -181,7 +186,7 @@ def dist_mean(x: torch.Tensor | dict[str, torch.Tensor]) -> torch.Tensor | dict[
 # val metrics estimator
 @torch.no_grad()
 def estimate_val_loss():
-    print("\nValidating...")
+    print("\nvalidating...")
     loss, metrics = 0.0, defaultdict(float)
     for k in range(eval_iters):
         X = get_batch("val")
@@ -243,7 +248,7 @@ else:
 # init model and optimizer
 
 if resume_dir is None:
-    print("Initializing a new model from scratch")
+    print("initializing a new model from scratch")
     model = model_cls(**model_args)
     model.to(device)
     ema = EMA(
@@ -285,7 +290,7 @@ if ddp:
 
 # compile the model
 if compile:
-    print("compiling the model...")
+    print("torch.compile(model): enabled")
     model = torch.compile(
         model,
         mode=None,
@@ -311,6 +316,7 @@ raw_model = raw_model.module if ddp else raw_model
 
 X = get_batch("train")  # fetch the very first batch
 t0 = time.time()
+print("starting training")
 
 while True:
 
@@ -345,7 +351,7 @@ while True:
     t1 = time.time()
     dt = t1 - t0
     t0 = t1
-    if (iter_num + 1) % log_interval == 0 and master_process:
+    if iter_num == 0 or (iter_num + 1) % log_interval == 0 and master_process:
         # get loss as float. note: this is a CPU-GPU sync point
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
@@ -363,7 +369,7 @@ while True:
             run["metrics/train/step_time"].log(dt, step=iter_num + 1)
 
     ema.update()
-    iter_num += 1
+    iter_num += 1  # inc true num of "completed" iterations
 
     # evaluate the loss on val set and write checkpoints
     if iter_num % eval_interval == 0:
@@ -372,7 +378,7 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         # print val metrics to stdout
         metrics_repr = " | ".join([f"{k} " + f"{v:.5f}" for k, v in metrics.items()])
-        print(f"Val @ {iter_num} updates: loss {val_loss:.4f}, {metrics_repr}\n")
+        print(f"val @ {iter_num} updates: loss {val_loss:.4f}, {metrics_repr}\n")
 
         if log_to_neptune:
             run["metrics/val/loss"].log(val_loss, step=iter_num)
@@ -397,11 +403,10 @@ while True:
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, out_dir / "ckpt.pt")
                 print("checkpoint created")
-                print("upload complete")
 
     # termination conditions
     if iter_num >= max_iters:
-        print(f"Training complete at {iter_num} iterations.")
+        print(f"training complete at {iter_num} iterations.")
         break
 
 if ddp:
