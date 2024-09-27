@@ -71,11 +71,11 @@ For openwebtext in particular you should ideally train on 16 or 32 A100 GPUs.
 Note that Discrete Diffusion models take much longer to train than autoregressive models.
 
 ```bash
-# d3pm_text8_8gpu modifies the single GPU config (see `configs.py`)
+# d3pm_text8_4gpu modifies the single GPU config (see `configs.py`)
 # note that the batch_size config is per GPU, while global_batch_size == batch_size * gradient_accumulation_steps * num_gpus
 # validation uses all GPUs, so eval_iters should be modified when changing number of GPUs
 # following uses ~35 GB GPU memory per GPU in my experiments
-torchrun --standalone --nproc_per_node=8 train.py d3pm_text8_8gpu
+torchrun --standalone --nproc_per_node=8 train.py d3pm_text8_4gpu
 
 # to train on openwebtext, first prepare using script borrowed from nanoGPT
 python data/prepare_openwebtext.py

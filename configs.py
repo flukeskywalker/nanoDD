@@ -16,7 +16,7 @@ def d3pm_text8():
         batch_size=256,
         learning_rate=1e-3,
         min_lr=1e-5,
-        gradient_accumulation_steps=8,
+        gradient_accumulation_steps=4,
         warmup_iters=2_500,
         max_iters=500_000,
         eval_iters=1000,
@@ -26,10 +26,10 @@ def d3pm_text8():
     return D3PMAbsorbing, model_args, training_args
 
 
-def d3pm_text8_gpu():
+def d3pm_text8_4gpu():
     model, model_args, training_args = d3pm_text8()
     training_args["gradient_accumulation_steps"] = 1
-    training_args["eval_iters"] = 125
+    training_args["eval_iters"] = 250
     return model, model_args, training_args
 
 
