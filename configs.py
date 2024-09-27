@@ -33,7 +33,7 @@ def d3pm_text8_gpu():
     return model, model_args, training_args
 
 
-def d3pm_openwebtext_32gpu():
+def d3pm_openwebtext_8gpu():
     model_args = dict(
         vocab_size=50257,
         n_embed=768,
@@ -50,11 +50,19 @@ def d3pm_openwebtext_32gpu():
         seq_len=1024,
         learning_rate=6e-4,
         min_lr=1e-5,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=8,
         warmup_iters=2_500,
         max_iters=500_000,
-        eval_iters=50,
+        eval_iters=400,
         weight_decay=0.1,
         training_seed=9,
     )
     return D3PMAbsorbing, model_args, training_args
+
+
+def d3pm_openwebtext_32gpu():
+    model, model_args, training_args = d3pm_openwebtext_8gpu()
+    training_args["gradient_accumulation_steps"] = 2
+    training_args["eval_iters"] = 50
+    return model, model_args, training_args
+
